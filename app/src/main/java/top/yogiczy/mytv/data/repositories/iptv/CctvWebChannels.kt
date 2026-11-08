@@ -11,10 +11,14 @@ import top.yogiczy.mytv.data.entities.IptvList
  * 背景：央视网 `tv.cctv.com/live/<slug>/` 是官方页面，走官方 CDN，IPv4 可达、不需要订阅源、
  * 也不需要 IPv6 —— 对"找不到稳定 IPTV 源"的网络环境是唯一的零维护兜底方案。
  *
- * 设计原则：**只补位，不覆盖**。
+ * 设计原则：**只补线路，不加频道**。
  * - 订阅源里已有的同名频道，不新增条目，只把网页地址追加到最后一条线路；
  *   这样原生线路全挂时，`LeanbackMainContentState` 的多线路切换会自动落到网页播放。
- * - 订阅源里没有的频道，收进"央视·网页频道"分组，保证没配源也能看。
+ * - 订阅源里没有的频道一律不补，列表内容始终等于用户自己的源。
+ * - 只有订阅源完全不可用（没配 / 拉取失败 / 解析为空）时才走 [fallback]，
+ *   用 `fallback` 的整组内置频道顶上。
+ *
+ * 该行为受设置项「央视网页兜底」控制，关闭后 [merge] 不会被调用。
  */
 object CctvWebChannels {
 
@@ -88,20 +92,17 @@ object CctvWebChannels {
     }
 
     /**
-     * 把内置网页频道合并进订阅源列表：
-     * 1. 命中的频道追加一条 `web://` 线路（放在最后，作为兜底）；
-     * 2. 未命中的频道归入开头的"央视·网页频道"分组。
+     * 给订阅源里命中的频道追加一条 `web://` 兜底线路。
+     *
+     * 只动 `urlList`，不新增也不删除任何频道——用户配了什么就显示什么。
      */
-    fun merge(source: IptvGroupList): IptvGroupList {
-        val matchedKeys = mutableSetOf<String>()
-
-        val mergedGroups = source.map { group ->
+    fun merge(source: IptvGroupList): IptvGroupList = IptvGroupList(
+        source.map { group ->
             IptvGroup(
                 name = group.name,
                 iptvList = IptvList(group.iptvList.map { iptv ->
                     val def = matchDef(iptv) ?: return@map iptv
 
-                    matchedKeys += def.key
                     if (iptv.urlList.any { it.startsWith(WEB_SCHEME) }) {
                         iptv
                     } else {
@@ -110,17 +111,7 @@ object CctvWebChannels {
                 })
             )
         }.filter { it.iptvList.isNotEmpty() }
-
-        val missing = DEFS.filter { it.key !in matchedKeys }
-        if (missing.isEmpty()) return IptvGroupList(mergedGroups)
-
-        val webGroup = IptvGroup(
-            name = WEB_GROUP_NAME,
-            iptvList = IptvList(missing.map { it.toIptv() }),
-        )
-
-        return IptvGroupList(listOf(webGroup) + mergedGroups)
-    }
+    )
 
     /** 订阅源完全不可用时的兜底列表 */
     fun fallback(): IptvGroupList = IptvGroupList(

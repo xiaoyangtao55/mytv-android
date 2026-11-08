@@ -75,6 +75,12 @@ fun LeanbackMainContent(
         videoPlayerState = videoPlayerState,
         iptvGroupList = iptvGroupList,
     )
+
+    // 开关 / 订阅源变化后列表会在同一个 Activity 内刷新，这里把新列表灌进已有状态，
+    // 不重建 state 以免重复注册播放器回调
+    LaunchedEffect(iptvGroupList) {
+        mainContentState.updateIptvGroupList(iptvGroupList)
+    }
     val panelChannelNoSelectState = rememberLeanbackPanelChannelNoSelectState(
         onChannelNoConfirm = {
             val channelNo = it.toInt() - 1

@@ -38,6 +38,7 @@ import top.yogiczy.mytv.ui.screens.leanback.components.LeanbackVisible
 import top.yogiczy.mytv.ui.screens.leanback.main.components.LeanbackBackPressHandledArea
 import top.yogiczy.mytv.ui.screens.leanback.main.components.LeanbackMainContent
 import top.yogiczy.mytv.ui.screens.leanback.settings.LeanbackSettingsScreen
+import top.yogiczy.mytv.ui.screens.leanback.toast.LeanbackToastState
 import top.yogiczy.mytv.ui.theme.LeanbackTheme
 import top.yogiczy.mytv.ui.utils.HttpServer
 import top.yogiczy.mytv.ui.utils.handleLeanbackKeyEvents
@@ -51,15 +52,26 @@ fun LeanbackMainScreen(
     val uiState by mainViewModel.uiState.collectAsState()
 
     when (val s = uiState) {
-        is LeanbackMainUiState.Ready -> LeanbackMainContent(
-            modifier = modifier,
-            iptvGroupList = s.iptvGroupList,
-            epgList = s.epgList,
-            onBackPressed = onBackPressed,
-        )
+        is LeanbackMainUiState.Ready -> {
+            // 降级说明（订阅源挂了、换成了内置频道）之前只在状态里躺着，没人显示
+            LaunchedEffect(s.notice) {
+                s.notice?.let { LeanbackToastState.I.showToast(it) }
+            }
+
+            LeanbackMainContent(
+                modifier = modifier,
+                iptvGroupList = s.iptvGroupList,
+                epgList = s.epgList,
+                onBackPressed = onBackPressed,
+            )
+        }
 
         is LeanbackMainUiState.Loading -> LeanbackMainSettingsHandle(onBackPressed = onBackPressed) {
-            LeanbackMainScreenLoading { s.message }
+            LeanbackMainScreenMessage { s.message }
+        }
+
+        is LeanbackMainUiState.Empty -> LeanbackMainSettingsHandle(onBackPressed = onBackPressed) {
+            LeanbackMainScreenMessage(title = "暂无可播放的频道", messageProvider = { s.message })
         }
 
         is LeanbackMainUiState.Error -> LeanbackMainSettingsHandle(onBackPressed = onBackPressed) {
@@ -69,7 +81,10 @@ fun LeanbackMainScreen(
 }
 
 @Composable
-private fun LeanbackMainScreenLoading(messageProvider: () -> String?) {
+private fun LeanbackMainScreenMessage(
+    title: String = "加载中...",
+    messageProvider: () -> String?,
+) {
     val childPadding = rememberLeanbackChildPadding()
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -79,7 +94,7 @@ private fun LeanbackMainScreenLoading(messageProvider: () -> String?) {
                 .padding(start = childPadding.start, bottom = childPadding.bottom),
         ) {
             Text(
-                text = "加载中...",
+                text = title,
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onBackground,
             )
@@ -101,7 +116,7 @@ private fun LeanbackMainScreenLoading(messageProvider: () -> String?) {
 @Composable
 private fun LeanbackMainScreenLoadingPreview() {
     LeanbackTheme {
-        LeanbackMainScreenLoading { "获取远程直播源(2/10)..." }
+        LeanbackMainScreenMessage { "获取远程直播源(2/10)..." }
     }
 }
 

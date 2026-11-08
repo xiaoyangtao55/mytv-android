@@ -74,6 +74,12 @@ object SP {
         /** 主动选择网页线路播放的频道（channelName 集合） */
         IPTV_CHANNEL_WEB_PREFERRED,
 
+        /** 央视网页兜底开关 */
+        IPTV_WEB_FALLBACK_ENABLE,
+
+        /** 上一次播放的频道标识（channelName），列表变化后按名字恢复 */
+        IPTV_LAST_CHANNEL_NAME,
+
         /** ==================== 节目单 ==================== */
         /** 启用节目单 */
         EPG_ENABLE,
@@ -214,6 +220,54 @@ object SP {
     var iptvChannelWebPreferred: Set<String>
         get() = sp.getStringSet(KEY.IPTV_CHANNEL_WEB_PREFERRED.name, emptySet()) ?: emptySet()
         set(value) = sp.edit().putStringSet(KEY.IPTV_CHANNEL_WEB_PREFERRED.name, value).apply()
+
+    /**
+     * 央视网页兜底，默认开启。
+     *
+     * 开启时央视系列频道会多一条 `web://` 线路，原生线路全部失效时自动落到官方网页；
+     * 关闭后完全不碰用户的频道列表，一个频道都不会多、一条线路都不会改。
+     */
+    var iptvWebFallbackEnable: Boolean
+        get() = sp.getBoolean(KEY.IPTV_WEB_FALLBACK_ENABLE.name, true)
+        set(value) = sp.edit().putBoolean(KEY.IPTV_WEB_FALLBACK_ENABLE.name, value).apply()
+
+    /**
+     * 上一次播放的频道标识。
+     *
+     * 只存 channelName 不存下标：切换网页兜底开关或换订阅源后，列表长度和顺序都会变，
+     * 按索引恢复会让用户莫名跳到别的台。
+     */
+    var iptvLastChannelName: String
+        get() = sp.getString(KEY.IPTV_LAST_CHANNEL_NAME.name, "") ?: ""
+        set(value) = sp.edit().putString(KEY.IPTV_LAST_CHANNEL_NAME.name, value).apply()
+
+    /** 会改变频道列表内容的配置项 */
+    private val IPTV_LIST_CHANGE_KEYS = setOf(
+        KEY.IPTV_SOURCE_URL.name,
+        KEY.IPTV_SOURCE_SIMPLIFY.name,
+        KEY.IPTV_WEB_FALLBACK_ENABLE.name,
+    )
+
+    /**
+     * 监听会影响频道列表的配置变化。
+     *
+     * 设置页和主界面在同一个 Activity 里，ViewModel 常驻；没有这个监听，
+     * 改完开关或订阅源必须杀进程才生效。
+     *
+     * 注意：SharedPreferences 内部用弱引用持有监听器，调用方必须自己强引用返回值，
+     * 并在销毁时 [removeListener]。
+     */
+    fun addIptvListChangeListener(onChange: () -> Unit): SharedPreferences.OnSharedPreferenceChangeListener {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key != null && key in IPTV_LIST_CHANGE_KEYS) onChange()
+        }
+        sp.registerOnSharedPreferenceChangeListener(listener)
+        return listener
+    }
+
+    fun removeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        sp.unregisterOnSharedPreferenceChangeListener(listener)
+    }
 
     /** ==================== 节目单 ==================== */
     /** 启用节目单 */

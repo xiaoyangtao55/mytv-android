@@ -74,6 +74,14 @@ class LeanbackSettingsViewModel : ViewModel() {
             SP.iptvSourceSimplify = value
         }
 
+    private var _iptvWebFallbackEnable by mutableStateOf(SP.iptvWebFallbackEnable)
+    var iptvWebFallbackEnable: Boolean
+        get() = _iptvWebFallbackEnable
+        set(value) {
+            _iptvWebFallbackEnable = value
+            SP.iptvWebFallbackEnable = value
+        }
+
     private var _iptvSourceCacheTime by mutableLongStateOf(SP.iptvSourceCacheTime)
     var iptvSourceCacheTime: Long
         get() = _iptvSourceCacheTime

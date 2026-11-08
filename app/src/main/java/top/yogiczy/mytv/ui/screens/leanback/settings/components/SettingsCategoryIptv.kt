@@ -106,6 +106,24 @@ fun LeanbackSettingsCategoryIptv(
 
         item {
             LeanbackSettingsCategoryListItem(
+                headlineContent = "央视网页兜底",
+                supportingContent = if (settingsViewModel.iptvWebFallbackEnable)
+                    "央视线路全部失效时改用官方网页播放，不新增频道" else "不修改频道列表，仅使用你配置的源",
+                trailingContent = {
+                    Switch(
+                        checked = settingsViewModel.iptvWebFallbackEnable,
+                        onCheckedChange = null
+                    )
+                },
+                onSelected = {
+                    settingsViewModel.iptvWebFallbackEnable =
+                        !settingsViewModel.iptvWebFallbackEnable
+                },
+            )
+        }
+
+        item {
+            LeanbackSettingsCategoryListItem(
                 headlineContent = "直播源缓存时间",
                 supportingContent = "短按增加1小时，长按设为0小时",
                 trailingContent = settingsViewModel.iptvSourceCacheTime.humanizeMs(),

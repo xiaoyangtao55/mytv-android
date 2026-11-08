@@ -27,8 +27,10 @@ import kotlin.math.max
 class LeanbackMainContentState(
     coroutineScope: CoroutineScope,
     private val videoPlayerState: LeanbackVideoPlayerState,
-    private val iptvGroupList: IptvGroupList,
+    iptvGroupList: IptvGroupList,
 ) : Loggable() {
+    private var _iptvGroupList by mutableStateOf(iptvGroupList)
+    private val iptvGroupList get() = _iptvGroupList
     private var _currentIptv by mutableStateOf(Iptv())
     val currentIptv get() = _currentIptv
 
@@ -64,9 +66,17 @@ class LeanbackMainContentState(
         }
 
     init {
-        changeCurrentIptv(iptvGroupList.iptvList.getOrElse(SP.iptvLastIptvIdx) {
-            iptvGroupList.firstOrNull()?.iptvList?.firstOrNull() ?: Iptv()
-        })
+        // 优先按频道标识恢复：切换网页兜底开关或换订阅源后列表长度会变，
+        // 只按索引恢复会让用户莫名跳到别的台
+        val restored = iptvGroupList.iptvList.firstOrNull {
+            SP.iptvLastChannelName.isNotBlank() && it.identity() == SP.iptvLastChannelName
+        }
+
+        changeCurrentIptv(
+            restored ?: iptvGroupList.iptvList.getOrElse(SP.iptvLastIptvIdx) {
+                iptvGroupList.firstOrNull()?.iptvList?.firstOrNull() ?: Iptv()
+            }
+        )
 
         videoPlayerState.onReady {
             coroutineScope.launch {
@@ -133,6 +143,8 @@ class LeanbackMainContentState(
 
         _currentIptv = iptv
         SP.iptvLastIptvIdx = iptvGroupList.iptvIdx(_currentIptv)
+        // 索引只在当前列表里有意义，另存一份标识用于列表变化后重新定位
+        iptv.identity().takeIf { it.isNotBlank() }?.let { SP.iptvLastChannelName = it }
 
         _currentIptvUrlIdx = if (urlIdx == null) {
             pickUrlIdx(_currentIptv)
@@ -181,6 +193,49 @@ class LeanbackMainContentState(
     fun changeCurrentIptvToNext() {
         changeCurrentIptv(getNextIptv())
     }
+
+    /**
+     * 频道列表热更新（切换「央视网页兜底」、换订阅源）。
+     *
+     * 不重建整个 state：`videoPlayerState` 的 onReady/onError 是往列表里追加监听器，
+     * 重建一次就多一套回调，越切越乱。
+     *
+     * 尽量不打断正在看的台：
+     * - 频道和当前线路都还在 → 只换引用，不重新 prepare；
+     * - 频道还在但线路被撤掉了（比如正播着网页而兜底被关）→ 重新选一条；
+     * - 频道整个消失 → 回到上次记住的台，再不行就第一个。
+     */
+    fun updateIptvGroupList(newIptvGroupList: IptvGroupList) {
+        if (newIptvGroupList == _iptvGroupList) return
+
+        val currentUrl = _currentIptv.urlList.getOrNull(_currentIptvUrlIdx)
+        val currentIdentity = _currentIptv.identity()
+        val sameChannel = newIptvGroupList.iptvList.firstOrNull {
+            currentIdentity.isNotBlank() && it.identity() == currentIdentity
+        }
+
+        _iptvGroupList = newIptvGroupList
+
+        when {
+            sameChannel == null -> {
+                val lastIdentity = SP.iptvLastChannelName
+                val target = newIptvGroupList.iptvList.firstOrNull {
+                    lastIdentity.isNotBlank() && it.identity() == lastIdentity
+                } ?: newIptvGroupList.iptvList.firstOrNull() ?: Iptv()
+                changeCurrentIptv(target)
+            }
+
+            currentUrl != null && sameChannel.urlList.contains(currentUrl) -> {
+                _currentIptv = sameChannel
+                _currentIptvUrlIdx = sameChannel.urlList.indexOf(currentUrl)
+            }
+
+            else -> changeCurrentIptv(sameChannel)
+        }
+    }
+
+    /** 频道标识：优先 channelName（EPG 用），TVBox 等源可能为空，退回显示名 */
+    private fun Iptv.identity(): String = channelName.ifBlank { name }
 }
 
 @Composable

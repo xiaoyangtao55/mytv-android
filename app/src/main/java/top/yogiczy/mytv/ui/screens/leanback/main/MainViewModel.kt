@@ -1,7 +1,9 @@
 package top.yogiczy.mytv.ui.screens.leanback.main
 
+import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,19 +31,53 @@ class LeanbackMainViewModel : ViewModel() {
     private val _uiState = MutableStateFlow<LeanbackMainUiState>(LeanbackMainUiState.Loading())
     val uiState: StateFlow<LeanbackMainUiState> = _uiState.asStateFlow()
 
+    private var refreshJob: Job? = null
+    private var iptvListListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+
     init {
-        viewModelScope.launch {
-            refreshIptv()
+        reloadIptv()
+
+        // 设置页和主界面共用一个 Activity，ViewModel 常驻；
+        // 没有这个监听，改完开关/订阅源要杀进程才生效
+        iptvListListener = SP.addIptvListChangeListener {
+            reloadIptv()
+        }
+    }
+
+    override fun onCleared() {
+        iptvListListener?.let { SP.removeListener(it) }
+        iptvListListener = null
+        super.onCleared()
+    }
+
+    /**
+     * 重建频道列表。
+     *
+     * 已有内容时不显示"加载中"：用户在设置里拨一下开关，不该看到界面先闪回加载页
+     * 再等源重试九秒。
+     */
+    private fun reloadIptv() {
+        val quiet = _uiState.value is LeanbackMainUiState.Ready
+
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
+            refreshIptv(quiet = quiet)
             refreshEpg()
         }
     }
 
-    private suspend fun refreshIptv() {
+    private suspend fun refreshIptv(quiet: Boolean = false) {
         val sourceUrl = SP.iptvSourceUrl
+        val webFallback = SP.iptvWebFallbackEnable
 
-        // 没配源（出厂占位符 1.2.3.4）就直接用内置央视网页频道，不要让用户干等 30 秒重试
-        if (sourceUrl.isBlank() || sourceUrl.contains("1.2.3.4")) {
-            _uiState.value = LeanbackMainUiState.Ready(iptvGroupList = CctvWebChannels.fallback())
+        // 没配源（出厂占位符 1.2.3.4）直接用内置央视网页频道，不要让用户干等重试
+        val hasSource = sourceUrl.isNotBlank() && !sourceUrl.contains("1.2.3.4")
+        if (!hasSource) {
+            _uiState.value = if (webFallback) {
+                LeanbackMainUiState.Ready(iptvGroupList = CctvWebChannels.fallback())
+            } else {
+                LeanbackMainUiState.Empty(EMPTY_NO_SOURCE)
+            }
             return
         }
 
@@ -58,18 +94,27 @@ class LeanbackMainViewModel : ViewModel() {
                 // 有内置频道兜底，没必要重试 10 次 —— 3 次（约 9 秒）足够区分"源慢"和"源挂"
                 if (attempt >= FALLBACK_RETRY_COUNT) return@retryWhen false
 
-                _uiState.value =
-                    LeanbackMainUiState.Loading("获取远程直播源(${attempt + 1}/$FALLBACK_RETRY_COUNT)...")
+                if (!quiet) {
+                    _uiState.value =
+                        LeanbackMainUiState.Loading("获取远程直播源(${attempt + 1}/$FALLBACK_RETRY_COUNT)...")
+                }
                 delay(Constants.HTTP_RETRY_INTERVAL)
                 true
             }
-            .map { source -> CctvWebChannels.merge(source) }
+            // 开关关闭时一个频道都不动，列表严格等于用户自己的源
+            .map { source -> if (webFallback) CctvWebChannels.merge(source) else source }
             .catch {
-                // 源挂了也要能看电视：直接进内置频道，而不是甩一个错误页
-                _uiState.value = LeanbackMainUiState.Ready(
-                    iptvGroupList = CctvWebChannels.fallback(),
-                    notice = "订阅源不可用，已切换为内置央视网页频道",
-                )
+                // 静默刷新失败就保留界面上已有的内容，别把用户在看的台顶掉
+                if (quiet) return@catch
+
+                _uiState.value = if (webFallback) {
+                    LeanbackMainUiState.Ready(
+                        iptvGroupList = CctvWebChannels.fallback(),
+                        notice = "订阅源不可用，已切换为内置央视网页频道",
+                    )
+                } else {
+                    LeanbackMainUiState.Empty(EMPTY_SOURCE_FAILED)
+                }
                 SP.iptvSourceUrlHistoryList -= sourceUrl
             }
             .map { merged ->
@@ -77,10 +122,14 @@ class LeanbackMainViewModel : ViewModel() {
                     _uiState.value = LeanbackMainUiState.Ready(iptvGroupList = merged)
                     SP.iptvSourceUrlHistoryList += sourceUrl
                 } else {
-                    _uiState.value = LeanbackMainUiState.Ready(
-                        iptvGroupList = CctvWebChannels.fallback(),
-                        notice = "订阅源没有解析出频道，已切换为内置央视网页频道",
-                    )
+                    _uiState.value = if (webFallback) {
+                        LeanbackMainUiState.Ready(
+                            iptvGroupList = CctvWebChannels.fallback(),
+                            notice = "订阅源没有解析出频道，已切换为内置央视网页频道",
+                        )
+                    } else {
+                        LeanbackMainUiState.Empty(EMPTY_SOURCE_EMPTY)
+                    }
                 }
                 merged
             }
@@ -106,8 +155,11 @@ class LeanbackMainViewModel : ViewModel() {
                     SP.epgXmlUrlHistoryList -= SP.epgXmlUrl
                 }
                 .map { epgList ->
-                    _uiState.value =
-                        (_uiState.value as LeanbackMainUiState.Ready).copy(epgList = epgList)
+                    // 期间列表可能已被下一次刷新替换掉，状态不是 Ready 就丢弃这次结果
+                    val current = _uiState.value
+                    if (current is LeanbackMainUiState.Ready) {
+                        _uiState.value = current.copy(epgList = epgList)
+                    }
                     SP.epgXmlUrlHistoryList += SP.epgXmlUrl
                 }
                 .collect()
@@ -118,6 +170,10 @@ class LeanbackMainViewModel : ViewModel() {
 sealed interface LeanbackMainUiState {
     data class Loading(val message: String? = null) : LeanbackMainUiState
     data class Error(val message: String? = null) : LeanbackMainUiState
+
+    /** 没有任何可播放的频道：没配源，且央视网页兜底被关掉了 */
+    data class Empty(val message: String) : LeanbackMainUiState
+
     data class Ready(
         val iptvGroupList: IptvGroupList = IptvGroupList(),
         val epgList: EpgList = EpgList(),
@@ -128,3 +184,12 @@ sealed interface LeanbackMainUiState {
 
 /** 配了订阅源但拉取失败时，最多重试几次就回落到内置频道 */
 private const val FALLBACK_RETRY_COUNT = 3L
+
+private const val EMPTY_NO_SOURCE =
+    "还没有配置直播源。按菜单键进设置添加，或开启「央视网页兜底」。"
+
+private const val EMPTY_SOURCE_FAILED =
+    "订阅源拉取失败。按菜单键进设置检查网络或换源，也能开启「央视网页兜底」先看央视。"
+
+private const val EMPTY_SOURCE_EMPTY =
+    "订阅源里没有频道。按菜单键进设置检查地址，也能开启「央视网页兜底」先看央视。"
