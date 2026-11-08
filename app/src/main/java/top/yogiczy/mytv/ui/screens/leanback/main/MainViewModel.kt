@@ -17,6 +17,7 @@ import top.yogiczy.mytv.data.entities.EpgList
 import top.yogiczy.mytv.data.entities.IptvGroupList
 import top.yogiczy.mytv.data.entities.IptvGroupList.Companion.iptvList
 import top.yogiczy.mytv.data.repositories.epg.EpgRepository
+import top.yogiczy.mytv.data.repositories.iptv.CctvWebChannels
 import top.yogiczy.mytv.data.repositories.iptv.IptvRepository
 import top.yogiczy.mytv.data.utils.Constants
 import top.yogiczy.mytv.ui.utils.SP
@@ -36,31 +37,52 @@ class LeanbackMainViewModel : ViewModel() {
     }
 
     private suspend fun refreshIptv() {
+        val sourceUrl = SP.iptvSourceUrl
+
+        // 没配源（出厂占位符 1.2.3.4）就直接用内置央视网页频道，不要让用户干等 30 秒重试
+        if (sourceUrl.isBlank() || sourceUrl.contains("1.2.3.4")) {
+            _uiState.value = LeanbackMainUiState.Ready(iptvGroupList = CctvWebChannels.fallback())
+            return
+        }
+
         flow {
             emit(
                 iptvRepository.getIptvGroupList(
-                    sourceUrl = SP.iptvSourceUrl,
+                    sourceUrl = sourceUrl,
                     cacheTime = SP.iptvSourceCacheTime,
                     simplify = SP.iptvSourceSimplify,
                 )
             )
         }
             .retryWhen { _, attempt ->
-                if (attempt >= Constants.HTTP_RETRY_COUNT) return@retryWhen false
+                // 有内置频道兜底，没必要重试 10 次 —— 3 次（约 9 秒）足够区分"源慢"和"源挂"
+                if (attempt >= FALLBACK_RETRY_COUNT) return@retryWhen false
 
                 _uiState.value =
-                    LeanbackMainUiState.Loading("获取远程直播源(${attempt + 1}/${Constants.HTTP_RETRY_COUNT})...")
+                    LeanbackMainUiState.Loading("获取远程直播源(${attempt + 1}/$FALLBACK_RETRY_COUNT)...")
                 delay(Constants.HTTP_RETRY_INTERVAL)
                 true
             }
+            .map { source -> CctvWebChannels.merge(source) }
             .catch {
-                _uiState.value = LeanbackMainUiState.Error(it.message)
-                SP.iptvSourceUrlHistoryList -= SP.iptvSourceUrl
+                // 源挂了也要能看电视：直接进内置频道，而不是甩一个错误页
+                _uiState.value = LeanbackMainUiState.Ready(
+                    iptvGroupList = CctvWebChannels.fallback(),
+                    notice = "订阅源不可用，已切换为内置央视网页频道",
+                )
+                SP.iptvSourceUrlHistoryList -= sourceUrl
             }
-            .map {
-                _uiState.value = LeanbackMainUiState.Ready(iptvGroupList = it)
-                SP.iptvSourceUrlHistoryList += SP.iptvSourceUrl
-                it
+            .map { merged ->
+                if (merged.isNotEmpty()) {
+                    _uiState.value = LeanbackMainUiState.Ready(iptvGroupList = merged)
+                    SP.iptvSourceUrlHistoryList += sourceUrl
+                } else {
+                    _uiState.value = LeanbackMainUiState.Ready(
+                        iptvGroupList = CctvWebChannels.fallback(),
+                        notice = "订阅源没有解析出频道，已切换为内置央视网页频道",
+                    )
+                }
+                merged
             }
             .collect()
     }
@@ -99,5 +121,10 @@ sealed interface LeanbackMainUiState {
     data class Ready(
         val iptvGroupList: IptvGroupList = IptvGroupList(),
         val epgList: EpgList = EpgList(),
+        /** 降级说明，非空时应在界面上提示一次 */
+        val notice: String? = null,
     ) : LeanbackMainUiState
 }
+
+/** 配了订阅源但拉取失败时，最多重试几次就回落到内置频道 */
+private const val FALLBACK_RETRY_COUNT = 3L

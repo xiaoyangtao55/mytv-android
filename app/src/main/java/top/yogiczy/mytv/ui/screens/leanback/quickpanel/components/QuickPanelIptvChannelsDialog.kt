@@ -37,6 +37,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okio.IOException
 import top.yogiczy.mytv.data.entities.Iptv
+import top.yogiczy.mytv.data.repositories.iptv.CctvWebChannels
 import top.yogiczy.mytv.ui.theme.LeanbackTheme
 import top.yogiczy.mytv.ui.utils.handleLeanbackKeyEvents
 import top.yogiczy.mytv.utils.isIPv6
@@ -155,7 +156,11 @@ private fun LeanbackQuickPanelIptvChannelItem(
                             .padding(vertical = 2.dp, horizontal = 4.dp)
 
                         androidx.tv.material3.Text(
-                            text = if (url.isIPv6()) "IPV6" else "IPV4",
+                            text = when {
+                            url.startsWith(CctvWebChannels.WEB_SCHEME) -> "网页"
+                            url.isIPv6() -> "IPV6"
+                            else -> "IPV4"
+                        },
                             modifier = textModifier,
                         )
 

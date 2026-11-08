@@ -27,7 +27,11 @@ import java.text.DecimalFormat
 fun LeanbackPanelPlayerInfo(
     modifier: Modifier = Modifier,
     metadataProvider: () -> LeanbackVideoPlayer.Metadata = { LeanbackVideoPlayer.Metadata() },
+    /** 网页线路没有 ExoPlayer 元数据，显示 0×0 / 0KB/s 只会让人以为坏了 */
+    visibleProvider: () -> Boolean = { true },
 ) {
+    if (!visibleProvider()) return
+
     CompositionLocalProvider(
         LocalTextStyle provides MaterialTheme.typography.bodyLarge,
         LocalContentColor provides MaterialTheme.colorScheme.onBackground

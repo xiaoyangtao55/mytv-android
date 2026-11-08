@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import top.yogiczy.mytv.data.repositories.iptv.CctvWebChannels
 import top.yogiczy.mytv.ui.screens.leanback.video.player.LeanbackMedia3VideoPlayer
 import top.yogiczy.mytv.ui.screens.leanback.video.player.LeanbackVideoPlayer
 
@@ -34,17 +35,78 @@ class LeanbackVideoPlayerState(
     /** 元数据 */
     var metadata by mutableStateOf(LeanbackVideoPlayer.Metadata())
 
+    /**
+     * 当前频道走网页播放时的地址（已去掉 web:// 前缀）。
+     * 非空表示这一路不是 ExoPlayer 在渲染，VideoScreen 要换成 WebView。
+     */
+    var webUrl by mutableStateOf<String?>(null)
+        private set
+
+    /** 网页是否还在加载（用于面板收起时机） */
+    var webLoading by mutableStateOf(false)
+        private set
+
+    /**
+     * 网页是否已经失败。
+     * 失败时必须把 WebView 从组合里摘掉：崩溃的渲染进程会留下一块黑色 surface，
+     * 盖住 Compose 画的错误提示，用户只看到黑屏。
+     */
+    var webFailed by mutableStateOf(false)
+        private set
+
+    /** WebView 侧的控制句柄，由 VideoScreen 挂上来 */
+    private var webController: WebVideoController? = null
+
+    fun attachWebController(controller: WebVideoController?) {
+        webController = controller
+    }
+
     fun prepare(url: String) {
         error = null
-        instance.prepare(url)
+
+        if (url.startsWith(CctvWebChannels.WEB_SCHEME)) {
+            webUrl = url.removePrefix(CctvWebChannels.WEB_SCHEME)
+            webLoading = true
+            webFailed = false
+            // 停掉原生播放器：换到网页频道后它不该继续在后台缓冲
+            instance.pause()
+        } else {
+            webUrl = null
+            webLoading = false
+            instance.prepare(url)
+        }
     }
 
     fun play() {
-        instance.play()
+        if (webUrl != null) {
+            webController?.play()
+        } else {
+            instance.play()
+        }
     }
 
     fun pause() {
-        instance.pause()
+        if (webUrl != null) {
+            webController?.pause()
+        } else {
+            instance.pause()
+        }
+    }
+
+    /** 网页加载完成：等价于原生播放器的 onReady */
+    fun notifyWebPageFinished() {
+        webLoading = false
+        webFailed = false
+        error = null
+        onReadyListeners.forEach { it.invoke() }
+    }
+
+    /** 网页加载失败：交给上层切下一条线路 */
+    fun notifyWebPageError(message: String) {
+        webLoading = false
+        webFailed = true
+        error = "网页加载失败：$message"
+        onErrorListeners.forEach { it.invoke() }
     }
 
     fun setVideoSurfaceView(surfaceView: SurfaceView) {
@@ -95,6 +157,9 @@ class LeanbackVideoPlayerState(
     fun release() {
         onReadyListeners.clear()
         onErrorListeners.clear()
+        webController?.release()
+        webController = null
+        webUrl = null
         instance.release()
     }
 }
@@ -138,4 +203,11 @@ fun rememberLeanbackVideoPlayerState(
     }
 
     return state
+}
+
+/** 网页播放的控制句柄，由 VideoScreen 里的 WebView 实现 */
+interface WebVideoController {
+    fun play()
+    fun pause()
+    fun release()
 }
