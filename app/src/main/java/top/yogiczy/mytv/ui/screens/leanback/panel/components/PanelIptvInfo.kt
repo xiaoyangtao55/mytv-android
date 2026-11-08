@@ -19,7 +19,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import top.yogiczy.mytv.data.entities.EpgProgrammeCurrent
 import top.yogiczy.mytv.data.entities.Iptv
-import top.yogiczy.mytv.data.repositories.iptv.CctvWebChannels
+import top.yogiczy.mytv.data.repositories.iptv.WebChannels
 import top.yogiczy.mytv.ui.theme.LeanbackTheme
 import top.yogiczy.mytv.utils.isIPv6
 
@@ -73,7 +73,7 @@ fun LeanbackPanelIptvInfo(
                     val currentUrl = iptv.urlList[iptvUrlIdx]
                     Text(
                         text = when {
-                            currentUrl.startsWith(CctvWebChannels.WEB_SCHEME) -> "网页"
+                            currentUrl.startsWith(WebChannels.WEB_SCHEME) -> "网页"
                             currentUrl.isIPv6() -> "IPV6"
                             else -> "IPV4"
                         },

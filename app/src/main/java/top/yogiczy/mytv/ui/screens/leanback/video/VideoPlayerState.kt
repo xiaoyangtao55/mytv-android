@@ -14,9 +14,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import top.yogiczy.mytv.data.repositories.iptv.CctvWebChannels
+import top.yogiczy.mytv.data.repositories.iptv.WebChannels
 import top.yogiczy.mytv.ui.screens.leanback.video.player.LeanbackMedia3VideoPlayer
 import top.yogiczy.mytv.ui.screens.leanback.video.player.LeanbackVideoPlayer
+import top.yogiczy.mytv.utils.Loggable
 
 /**
  * 播放器状态
@@ -25,7 +26,7 @@ import top.yogiczy.mytv.ui.screens.leanback.video.player.LeanbackVideoPlayer
 class LeanbackVideoPlayerState(
     private val instance: LeanbackVideoPlayer,
     private val defaultAspectRatioProvider: () -> Float? = { null },
-) {
+) : Loggable() {
     /** 视频宽高比 */
     var aspectRatio by mutableFloatStateOf(16f / 9f)
 
@@ -57,6 +58,19 @@ class LeanbackVideoPlayerState(
     /** WebView 侧的控制句柄，由 VideoScreen 挂上来 */
     private var webController: WebVideoController? = null
 
+    /** 上一次 prepare 的原始地址，用于判断是不是换了台 */
+    private var lastPreparedUrl: String? = null
+
+    /**
+     * 最近一次"抓流转原生"针对的网页地址与时间。
+     *
+     * 用来止损：直连流播不出来时上层会自动切下一条线路，绕回同一个网页后如果又抓一次，
+     * 就会形成 `网页 → 抓流 → 原生失败 → 网页` 的循环。同一页面两分钟内只试一次，
+     * 用户主动切台回来（超过窗口）仍然会重新尝试。
+     */
+    private var lastResolvedWebUrl: String? = null
+    private var lastResolvedAt = 0L
+
     fun attachWebController(controller: WebVideoController?) {
         webController = controller
     }
@@ -64,8 +78,10 @@ class LeanbackVideoPlayerState(
     fun prepare(url: String) {
         error = null
 
-        if (url.startsWith(CctvWebChannels.WEB_SCHEME)) {
-            webUrl = url.removePrefix(CctvWebChannels.WEB_SCHEME)
+        if (url != lastPreparedUrl) lastPreparedUrl = url
+
+        if (url.startsWith(WebChannels.WEB_SCHEME)) {
+            webUrl = url.removePrefix(WebChannels.WEB_SCHEME)
             webLoading = true
             webFailed = false
             // 停掉原生播放器：换到网页频道后它不该继续在后台缓冲
@@ -75,6 +91,43 @@ class LeanbackVideoPlayerState(
             webLoading = false
             instance.prepare(url)
         }
+    }
+
+    /**
+     * WebView 里拦到了真正的流地址（m3u8/flv）。
+     *
+     * 这是网页线路的主路径：网页只负责"找到流"，播放交回 ExoPlayer。
+     * 原因很实际 —— 盒子的系统 WebView 常常缺少 MSE 或硬解能力，
+     * 页面能渲染出来但 <video> 一片黑；而同一路流交给 ExoPlayer 是硬解，遥控器也能控。
+     *
+     * @param streamUrl 拦截到的媒体地址
+     * @param referer 该流所属页面的 origin，部分源（荔枝网）缺它会 403
+     * @param sourcePageUrl 发起这个请求的页面地址，用来丢弃"切台之后才到的迟到回调"
+     */
+    fun onWebStreamFound(streamUrl: String, referer: String?, sourcePageUrl: String?) {
+        // 已经不在网页线路上了（用户切到原生，或切到了另一个网页频道）
+        val currentPage = webUrl ?: return
+        if (sourcePageUrl != null && sourcePageUrl != currentPage) {
+            log.d("忽略旧页面的迟到回调: $sourcePageUrl（当前 $currentPage）")
+            return
+        }
+
+        val pageUrl = lastPreparedUrl
+        val now = System.currentTimeMillis()
+        if (pageUrl != null && pageUrl == lastResolvedWebUrl && now - lastResolvedAt < WEB_RESOLVE_COOLDOWN_MS) {
+            log.d("网页线路刚试过直连，跳过重复解析: $pageUrl")
+            return
+        }
+        lastResolvedWebUrl = pageUrl
+        lastResolvedAt = now
+
+        log.d("网页线路解析到直连流，切回原生播放: $streamUrl" + if (referer != null) "（Referer=$referer）" else "")
+
+        webUrl = null
+        webLoading = false
+        webFailed = false
+        error = null
+        instance.prepare(streamUrl, referer)
     }
 
     fun play() {
@@ -211,3 +264,6 @@ interface WebVideoController {
     fun pause()
     fun release()
 }
+
+/** 同一个网页地址的最短重试间隔 */
+private const val WEB_RESOLVE_COOLDOWN_MS = 2 * 60 * 1000L

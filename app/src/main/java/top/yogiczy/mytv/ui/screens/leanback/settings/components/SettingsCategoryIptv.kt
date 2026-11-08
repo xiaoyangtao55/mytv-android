@@ -106,9 +106,9 @@ fun LeanbackSettingsCategoryIptv(
 
         item {
             LeanbackSettingsCategoryListItem(
-                headlineContent = "央视网页兜底",
+                headlineContent = "网页频道兜底",
                 supportingContent = if (settingsViewModel.iptvWebFallbackEnable)
-                    "央视线路全部失效时改用官方网页播放，不新增频道" else "不修改频道列表，仅使用你配置的源",
+                    "央视与卫视线路全部失效时改用官方网页，不新增频道" else "不修改频道列表，仅使用你配置的源",
                 trailingContent = {
                     Switch(
                         checked = settingsViewModel.iptvWebFallbackEnable,

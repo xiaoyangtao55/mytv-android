@@ -26,7 +26,11 @@ abstract class LeanbackVideoPlayer(
         clearAllListeners()
     }
 
-    abstract fun prepare(url: String)
+    /**
+     * @param referer 部分源（如荔枝网）校验 Referer，缺了直接 403。
+     *   从网页里解析出来的流地址必须带上它所属页面的 origin。
+     */
+    abstract fun prepare(url: String, referer: String? = null)
 
     abstract fun play()
 

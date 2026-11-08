@@ -15,7 +15,7 @@ import top.yogiczy.mytv.data.entities.Iptv
 import top.yogiczy.mytv.data.entities.IptvGroupList
 import top.yogiczy.mytv.data.entities.IptvGroupList.Companion.iptvIdx
 import top.yogiczy.mytv.data.entities.IptvGroupList.Companion.iptvList
-import top.yogiczy.mytv.data.repositories.iptv.CctvWebChannels
+import top.yogiczy.mytv.data.repositories.iptv.WebChannels
 import top.yogiczy.mytv.data.utils.Constants
 import top.yogiczy.mytv.ui.screens.leanback.video.LeanbackVideoPlayerState
 import top.yogiczy.mytv.ui.screens.leanback.video.rememberLeanbackVideoPlayerState
@@ -166,12 +166,12 @@ class LeanbackMainContentState(
      * 2. 否则沿用"记得能播的域名"，网页线路永远不参与这个记忆（它是最后的兜底）。
      */
     private fun pickUrlIdx(iptv: Iptv): Int {
-        val webIdx = iptv.urlList.indexOfFirst { it.startsWith(CctvWebChannels.WEB_SCHEME) }
+        val webIdx = iptv.urlList.indexOfFirst { it.startsWith(WebChannels.WEB_SCHEME) }
 
         if (webIdx >= 0 && SP.iptvChannelWebPreferred.contains(iptv.channelName)) return webIdx
 
         return max(0, iptv.urlList.indexOfFirst {
-            !it.startsWith(CctvWebChannels.WEB_SCHEME) &&
+            !it.startsWith(WebChannels.WEB_SCHEME) &&
                     SP.iptvPlayableHostList.contains(getUrlHost(it))
         })
     }
@@ -179,7 +179,7 @@ class LeanbackMainContentState(
     /** 用户主动选线路时，记住或撤销"这个台用网页" */
     private fun rememberWebPreference(iptv: Iptv, url: String) {
         val preferred = SP.iptvChannelWebPreferred
-        SP.iptvChannelWebPreferred = if (url.startsWith(CctvWebChannels.WEB_SCHEME)) {
+        SP.iptvChannelWebPreferred = if (url.startsWith(WebChannels.WEB_SCHEME)) {
             preferred + iptv.channelName
         } else {
             preferred - iptv.channelName
@@ -257,18 +257,18 @@ private const val WEB_URL_HOST = "web://"
 private fun getUrlHost(url: String): String {
     // web://https://tv.cctv.com/... 直接 split("://") 的第二段是 "https"，
     // 一旦混进"可播放域名"记忆，其他频道原生线路没成功过时就会误选网页线路。
-    if (url.startsWith(CctvWebChannels.WEB_SCHEME)) return WEB_URL_HOST
+    if (url.startsWith(WebChannels.WEB_SCHEME)) return WEB_URL_HOST
 
     return url.split("://").getOrElse(1) { "" }.split("/").firstOrNull() ?: url
 }
 
 /** 记录可播放域名；网页线路不是真实流，不参与记忆 */
 private fun rememberPlayableHost(url: String) {
-    if (url.startsWith(CctvWebChannels.WEB_SCHEME)) return
+    if (url.startsWith(WebChannels.WEB_SCHEME)) return
     SP.iptvPlayableHostList += getUrlHost(url)
 }
 
 private fun forgetPlayableHost(url: String) {
-    if (url.startsWith(CctvWebChannels.WEB_SCHEME)) return
+    if (url.startsWith(WebChannels.WEB_SCHEME)) return
     SP.iptvPlayableHostList -= getUrlHost(url)
 }

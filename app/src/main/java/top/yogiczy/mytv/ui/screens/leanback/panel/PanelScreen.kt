@@ -39,7 +39,7 @@ import top.yogiczy.mytv.ui.screens.leanback.panel.components.LeanbackPanelChanne
 import top.yogiczy.mytv.ui.screens.leanback.panel.components.LeanbackPanelDateTime
 import top.yogiczy.mytv.ui.screens.leanback.panel.components.LeanbackPanelIptvFavoriteList
 import top.yogiczy.mytv.ui.screens.leanback.panel.components.LeanbackPanelIptvGroupList
-import top.yogiczy.mytv.data.repositories.iptv.CctvWebChannels
+import top.yogiczy.mytv.data.repositories.iptv.WebChannels
 import top.yogiczy.mytv.ui.screens.leanback.panel.components.LeanbackPanelIptvInfo
 import top.yogiczy.mytv.ui.screens.leanback.panel.components.LeanbackPanelPlayerInfo
 import top.yogiczy.mytv.ui.screens.leanback.toast.LeanbackToastState
@@ -174,7 +174,7 @@ private fun LeanbackPanelScreenBottom(
                 visibleProvider = {
                     val iptv = currentIptvProvider()
                     val url = iptv.urlList.getOrNull(currentIptvUrlIdxProvider())
-                    url == null || !url.startsWith(CctvWebChannels.WEB_SCHEME)
+                    url == null || !url.startsWith(WebChannels.WEB_SCHEME)
                 },
             )
 

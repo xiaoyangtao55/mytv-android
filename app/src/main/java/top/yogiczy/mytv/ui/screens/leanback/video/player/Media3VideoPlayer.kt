@@ -44,16 +44,26 @@ class LeanbackMedia3VideoPlayer(
     private val contentTypeAttempts = mutableMapOf<Int, Boolean>()
     private var updatePositionJob: Job? = null
 
+    /** 当前媒体源的 Referer，容器重试时也要带上，否则会 403 */
+    private var currentReferer: String? = null
+
     @OptIn(UnstableApi::class)
-    private fun prepare(uri: Uri, contentType: Int? = null) {
-        val dataSourceFactory =
-            DefaultDataSource.Factory(context, DefaultHttpDataSource.Factory().apply {
-                setUserAgent(SP.videoPlayerUserAgent)
-                setConnectTimeoutMs(SP.videoPlayerLoadTimeout.toInt())
-                setReadTimeoutMs(SP.videoPlayerLoadTimeout.toInt())
-                setKeepPostFor302Redirects(true)
-                setAllowCrossProtocolRedirects(true)
-            })
+    private fun prepare(uri: Uri, contentType: Int? = null, referer: String? = null) {
+        currentReferer = referer
+
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory().apply {
+            setUserAgent(SP.videoPlayerUserAgent)
+            setConnectTimeoutMs(SP.videoPlayerLoadTimeout.toInt())
+            setReadTimeoutMs(SP.videoPlayerLoadTimeout.toInt())
+            setKeepPostFor302Redirects(true)
+            setAllowCrossProtocolRedirects(true)
+            // 荔枝网这类源会校验来源页，缺 Referer 直接 403
+            if (!referer.isNullOrBlank()) {
+                setDefaultRequestProperties(mapOf("Referer" to referer))
+            }
+        }
+
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 
         val mediaItem = MediaItem.fromUri(uri)
 
@@ -106,11 +116,11 @@ class LeanbackMedia3VideoPlayer(
                 val uri = videoPlayer.currentMediaItem?.localConfiguration?.uri
                 if (uri != null) {
                     if (contentTypeAttempts[C.CONTENT_TYPE_HLS] != true) {
-                        prepare(uri, C.CONTENT_TYPE_HLS)
+                        prepare(uri, C.CONTENT_TYPE_HLS, currentReferer)
                     } else if (contentTypeAttempts[C.CONTENT_TYPE_OTHER] != true) {
-                        prepare(uri, C.CONTENT_TYPE_OTHER)
+                        prepare(uri, C.CONTENT_TYPE_OTHER, currentReferer)
                     } else if (contentTypeAttempts[C.CONTENT_TYPE_OTHER] != true) {
-                        prepare(uri, C.CONTENT_TYPE_OTHER)
+                        prepare(uri, C.CONTENT_TYPE_OTHER, currentReferer)
                     } else {
                         triggerError(PlaybackException.UNSUPPORTED_TYPE)
                     }
@@ -215,9 +225,9 @@ class LeanbackMedia3VideoPlayer(
     }
 
     @UnstableApi
-    override fun prepare(url: String) {
+    override fun prepare(url: String, referer: String?) {
         contentTypeAttempts.clear()
-        prepare(Uri.parse(url))
+        prepare(Uri.parse(url), referer = referer)
     }
 
     override fun play() {
