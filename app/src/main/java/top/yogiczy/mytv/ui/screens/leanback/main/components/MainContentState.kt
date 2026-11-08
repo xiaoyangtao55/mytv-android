@@ -15,6 +15,7 @@ import top.yogiczy.mytv.data.entities.Iptv
 import top.yogiczy.mytv.data.entities.IptvGroupList
 import top.yogiczy.mytv.data.entities.IptvGroupList.Companion.iptvIdx
 import top.yogiczy.mytv.data.entities.IptvGroupList.Companion.iptvList
+import top.yogiczy.mytv.data.repositories.iptv.CctvWebChannels
 import top.yogiczy.mytv.data.utils.Constants
 import top.yogiczy.mytv.ui.screens.leanback.video.LeanbackVideoPlayerState
 import top.yogiczy.mytv.ui.screens.leanback.video.rememberLeanbackVideoPlayerState
@@ -77,8 +78,8 @@ class LeanbackMainContentState(
                 }
             }
 
-            // 记忆可播放的域名
-            SP.iptvPlayableHostList += getUrlHost(_currentIptv.urlList[_currentIptvUrlIdx])
+            // 记忆可播放的域名（网页线路不是真实流，不参与记忆）
+            rememberPlayableHost(_currentIptv.urlList[_currentIptvUrlIdx])
         }
 
         videoPlayerState.onError {
@@ -86,8 +87,8 @@ class LeanbackMainContentState(
                 changeCurrentIptv(_currentIptv, _currentIptvUrlIdx + 1)
             }
 
-            // 从记忆中删除不可播放的域名
-            SP.iptvPlayableHostList -= getUrlHost(_currentIptv.urlList[_currentIptvUrlIdx])
+            // 从记忆中删除不可播放的域名（网页线路不在记忆范围内）
+            forgetPlayableHost(_currentIptv.urlList[_currentIptvUrlIdx])
         }
 
         videoPlayerState.onCutoff {
@@ -109,13 +110,23 @@ class LeanbackMainContentState(
         }
     }
 
-    fun changeCurrentIptv(iptv: Iptv, urlIdx: Int? = null) {
+    /**
+     * 切换频道或线路。
+     *
+     * @param urlIdx       指定线路；为 null 时先看"用户是否给这个台指定过网页"，再按记得能播的域名选
+     * @param userSelected 是否由用户主动操作（左右键 / 线路列表）。只有主动选择才写入网页偏好，
+     *                     自动降级（onError 往后推进）不能写，否则一次失败就把这个台永久钉在网页上。
+     */
+    fun changeCurrentIptv(iptv: Iptv, urlIdx: Int? = null, userSelected: Boolean = false) {
         _isPanelVisible = false
 
         if (iptv == _currentIptv && urlIdx == null) return
 
-        if (iptv == _currentIptv && urlIdx != _currentIptvUrlIdx) {
-            SP.iptvPlayableHostList -= getUrlHost(_currentIptv.urlList[_currentIptvUrlIdx])
+        // 只有"同一频道内主动换线路"才需要把旧线路的域名移出记忆；
+        // 换频道时 urlIdx 为 null，此前这里用 `urlIdx != _currentIptvUrlIdx` 会恒成立，
+        // 导致每换一次台就把上一个台的记忆删掉。
+        if (iptv == _currentIptv && urlIdx != null && urlIdx != _currentIptvUrlIdx) {
+            forgetPlayableHost(_currentIptv.urlList[_currentIptvUrlIdx])
         }
 
         _isTempPanelVisible = true
@@ -124,10 +135,7 @@ class LeanbackMainContentState(
         SP.iptvLastIptvIdx = iptvGroupList.iptvIdx(_currentIptv)
 
         _currentIptvUrlIdx = if (urlIdx == null) {
-            // 优先从记忆中选择可播放的域名
-            max(0, _currentIptv.urlList.indexOfFirst {
-                SP.iptvPlayableHostList.contains(getUrlHost(it))
-            })
+            pickUrlIdx(_currentIptv)
         } else {
             (urlIdx + _currentIptv.urlList.size) % _currentIptv.urlList.size
         }
@@ -135,7 +143,35 @@ class LeanbackMainContentState(
         val url = iptv.urlList[_currentIptvUrlIdx]
         log.d("播放${iptv.name}（${_currentIptvUrlIdx + 1}/${_currentIptv.urlList.size}）: $url")
 
+        if (userSelected) rememberWebPreference(_currentIptv, url)
+
         videoPlayerState.prepare(url)
+    }
+
+    /**
+     * 选线路的优先级：
+     * 1. 用户主动给这个台指定过网页 → 就用网页，跨启动保持；
+     * 2. 否则沿用"记得能播的域名"，网页线路永远不参与这个记忆（它是最后的兜底）。
+     */
+    private fun pickUrlIdx(iptv: Iptv): Int {
+        val webIdx = iptv.urlList.indexOfFirst { it.startsWith(CctvWebChannels.WEB_SCHEME) }
+
+        if (webIdx >= 0 && SP.iptvChannelWebPreferred.contains(iptv.channelName)) return webIdx
+
+        return max(0, iptv.urlList.indexOfFirst {
+            !it.startsWith(CctvWebChannels.WEB_SCHEME) &&
+                    SP.iptvPlayableHostList.contains(getUrlHost(it))
+        })
+    }
+
+    /** 用户主动选线路时，记住或撤销"这个台用网页" */
+    private fun rememberWebPreference(iptv: Iptv, url: String) {
+        val preferred = SP.iptvChannelWebPreferred
+        SP.iptvChannelWebPreferred = if (url.startsWith(CctvWebChannels.WEB_SCHEME)) {
+            preferred + iptv.channelName
+        } else {
+            preferred - iptv.channelName
+        }
     }
 
     fun changeCurrentIptvToPrev() {
@@ -160,6 +196,24 @@ fun rememberLeanbackMainContentState(
     )
 }
 
+/** 网页线路的伪 host：真实域名不可能包含 "://"，因此永远不会与它们冲突 */
+private const val WEB_URL_HOST = "web://"
+
 private fun getUrlHost(url: String): String {
+    // web://https://tv.cctv.com/... 直接 split("://") 的第二段是 "https"，
+    // 一旦混进"可播放域名"记忆，其他频道原生线路没成功过时就会误选网页线路。
+    if (url.startsWith(CctvWebChannels.WEB_SCHEME)) return WEB_URL_HOST
+
     return url.split("://").getOrElse(1) { "" }.split("/").firstOrNull() ?: url
+}
+
+/** 记录可播放域名；网页线路不是真实流，不参与记忆 */
+private fun rememberPlayableHost(url: String) {
+    if (url.startsWith(CctvWebChannels.WEB_SCHEME)) return
+    SP.iptvPlayableHostList += getUrlHost(url)
+}
+
+private fun forgetPlayableHost(url: String) {
+    if (url.startsWith(CctvWebChannels.WEB_SCHEME)) return
+    SP.iptvPlayableHostList -= getUrlHost(url)
 }

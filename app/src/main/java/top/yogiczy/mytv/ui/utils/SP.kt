@@ -71,6 +71,9 @@ object SP {
         /** 直播源频道收藏列表 */
         IPTV_CHANNEL_FAVORITE_LIST,
 
+        /** 主动选择网页线路播放的频道（channelName 集合） */
+        IPTV_CHANNEL_WEB_PREFERRED,
+
         /** ==================== 节目单 ==================== */
         /** 启用节目单 */
         EPG_ENABLE,
@@ -202,6 +205,15 @@ object SP {
     var iptvChannelFavoriteList: Set<String>
         get() = sp.getStringSet(KEY.IPTV_CHANNEL_FAVORITE_LIST.name, emptySet()) ?: emptySet()
         set(value) = sp.edit().putStringSet(KEY.IPTV_CHANNEL_FAVORITE_LIST.name, value).apply()
+
+    /**
+     * 主动选择网页线路播放的频道。
+     * 用户在播放页把某个台切到「网页」后记下来，之后再进这个台直接走网页，
+     * 切回原生线路则撤销。存 channelName 而不是线路下标，换源后下标会变。
+     */
+    var iptvChannelWebPreferred: Set<String>
+        get() = sp.getStringSet(KEY.IPTV_CHANNEL_WEB_PREFERRED.name, emptySet()) ?: emptySet()
+        set(value) = sp.edit().putStringSet(KEY.IPTV_CHANNEL_WEB_PREFERRED.name, value).apply()
 
     /** ==================== 节目单 ==================== */
     /** 启用节目单 */

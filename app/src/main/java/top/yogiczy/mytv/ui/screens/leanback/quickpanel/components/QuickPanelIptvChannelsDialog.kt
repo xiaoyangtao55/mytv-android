@@ -196,7 +196,14 @@ private fun rememberIptvUrlDelay(url: String): Long {
     var elapsedTime by remember { mutableLongStateOf(0) }
     var hasError by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(url) {
+        // 网页线路不是 http(s) 流地址，OkHttp 的 url() 会抛 IllegalArgumentException，
+        // 而它不在 IOException 范围内 —— 打开线路列表就会崩。网页也不需要测这个延迟。
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            hasError = true
+            return@LaunchedEffect
+        }
+
         withContext(Dispatchers.IO) {
             val client = OkHttpClient()
             val request = Request.Builder().url(url).build()

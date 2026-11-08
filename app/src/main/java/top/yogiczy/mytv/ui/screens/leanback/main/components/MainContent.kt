@@ -130,6 +130,7 @@ fun LeanbackMainContent(
                             mainContentState.changeCurrentIptv(
                                 iptv = mainContentState.currentIptv,
                                 urlIdx = mainContentState.currentIptvUrlIdx - 1,
+                                userSelected = true,
                             )
                         }
                     },
@@ -138,6 +139,7 @@ fun LeanbackMainContent(
                             mainContentState.changeCurrentIptv(
                                 iptv = mainContentState.currentIptv,
                                 urlIdx = mainContentState.currentIptvUrlIdx + 1,
+                                userSelected = true,
                             )
                         }
                     },
@@ -165,6 +167,7 @@ fun LeanbackMainContent(
                             mainContentState.changeCurrentIptv(
                                 iptv = mainContentState.currentIptv,
                                 urlIdx = mainContentState.currentIptvUrlIdx - 1,
+                                userSelected = true,
                             )
                         }
                     },
@@ -173,6 +176,7 @@ fun LeanbackMainContent(
                             mainContentState.changeCurrentIptv(
                                 iptv = mainContentState.currentIptv,
                                 urlIdx = mainContentState.currentIptvUrlIdx + 1,
+                                userSelected = true,
                             )
                         }
                     },
@@ -291,6 +295,7 @@ fun LeanbackMainContent(
                     mainContentState.changeCurrentIptv(
                         iptv = mainContentState.currentIptv,
                         urlIdx = it,
+                        userSelected = true,
                     )
                 },
                 onClearCache = {
